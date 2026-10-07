@@ -7,12 +7,16 @@ so modules can add tables without touching anyone else's schema.
 
 from __future__ import annotations
 
+import itertools
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Sequence
+
+
+_savepoint_ids = itertools.count(1)
 
 
 @dataclass(frozen=True)
@@ -39,7 +43,23 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
 
 @contextmanager
 def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
-    """Run a block atomically: commit on success, roll back on any exception."""
+    """Run a block atomically: commit on success, roll back on any exception.
+
+    Nests: inside an outer transaction it becomes a savepoint, so a function
+    that is atomic on its own (e.g. mark-as-eaten) can also be part of a
+    larger atomic operation (e.g. applying an AI proposal).
+    """
+    if conn.in_transaction:
+        name = f"sp_{next(_savepoint_ids)}"
+        conn.execute(f"SAVEPOINT {name}")
+        try:
+            yield conn
+        except BaseException:
+            conn.execute(f"ROLLBACK TO {name}")
+            conn.execute(f"RELEASE {name}")
+            raise
+        conn.execute(f"RELEASE {name}")
+        return
     conn.execute("BEGIN IMMEDIATE")
     try:
         yield conn

@@ -3,6 +3,10 @@
 #   sed "s/__USER__/$USER/g" deploy/mealplanner.service | sudo tee /etc/systemd/system/mealplanner.service
 #   sudo systemctl daemon-reload && sudo systemctl enable --now mealplanner
 #
+# Secrets (ANTHROPIC_API_KEY) go in /etc/mealplanner.env, owned by root with mode 600;
+# systemd reads it before starting the app. The file is optional: without it the
+# app runs with the AI chat switched off.
+#
 # Listens on 127.0.0.1 only; `tailscale serve` provides HTTPS to your devices.
 # For plain-HTTP access on your home network instead, change --host to 0.0.0.0.
 
@@ -16,6 +20,7 @@ Type=simple
 User=__USER__
 WorkingDirectory=/home/__USER__/gergie-life-planner/backend
 Environment=MEALPLANNER_DB=/home/__USER__/gergie-life-planner/backend/data/mealplanner.db
+EnvironmentFile=-/etc/mealplanner.env
 ExecStart=/home/__USER__/gergie-life-planner/backend/.venv/bin/python -m uvicorn --factory mealplanner.main:create_app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5

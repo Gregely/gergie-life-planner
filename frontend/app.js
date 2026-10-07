@@ -607,9 +607,133 @@ async function pantryView() {
   ];
 }
 
+// ---------------------------------------------------------------- AI chat
+// The API key lives only on the server. This screen talks to /api/ai/*; every
+// change the AI wants to make arrives as a proposal card you apply or reject.
+
+const PROPOSAL_STATUS = { applied: '✓ Applied', rejected: 'Rejected', discarded: 'Discarded' };
+
+function proposalCard(proposal) {
+  let p = proposal;
+  const card = h('div', {});
+  const error = h('p', { class: 'error', hidden: true });
+
+  async function decide(action, button) {
+    button.disabled = true;
+    error.hidden = true;
+    try {
+      const res = await api('POST', `/ai/proposals/${p.id}/${action}`);
+      p = res.proposal;
+      draw();
+      if (action === 'apply') {
+        if (p.tool === 'mark_eaten') showEatenResult(res.result);
+        else if (p.tool === 'record_bought') flash(`Added ${res.result.added.length} item${res.result.added.length === 1 ? '' : 's'} to the pantry.`);
+        else flash('Applied.');
+      }
+    } catch (e) {
+      error.textContent = e.message;
+      error.hidden = false;
+      button.disabled = false;
+    }
+  }
+
+  function draw() {
+    const pending = p.status === 'pending';
+    card.className = `proposal ${p.status}`;
+    card.replaceChildren(
+      h('div', { class: 'proposal-title' },
+        p.tool === 'create_recipe' && pending ? h('span', { class: 'tag' }, 'draft') : null,
+        ` ${p.summary}`),
+      p.details.length ? h('ul', {}, p.details.map((d) => h('li', {}, d))) : null,
+      pending
+        ? h('div', { class: 'toolbar' },
+          h('button', { type: 'button', class: 'primary', onclick: (ev) => decide('apply', ev.currentTarget) }, 'Apply'),
+          h('button', { type: 'button', onclick: (ev) => decide('reject', ev.currentTarget) }, 'Reject'))
+        : h('p', { class: 'muted' }, PROPOSAL_STATUS[p.status] || p.status),
+      error,
+    );
+  }
+  draw();
+  return card;
+}
+
+function chatTurn(userText, reply, proposals) {
+  return [
+    h('div', { class: 'bubble user' }, userText),
+    reply == null ? null : h('div', { class: 'bubble ai' }, reply),
+    proposals.map(proposalCard),
+  ];
+}
+
+async function chatView() {
+  const status = await api('GET', '/ai/status');
+  let sessionId = store.get('ai-session', null);
+  let turns = [];
+  if (sessionId) {
+    try {
+      turns = (await api('GET', `/ai/sessions/${sessionId}`)).turns;
+    } catch {
+      sessionId = null; // e.g. the database was restored; start fresh
+      store.set('ai-session', null);
+    }
+  }
+
+  const log = h('div', { class: 'chat-log', 'aria-live': 'polite' },
+    turns.map((t) => chatTurn(t.user, t.reply, t.proposals)));
+  const input = h('textarea', {
+    rows: '3', maxlength: String(status.max_message_chars), 'aria-label': 'Message',
+    placeholder: status.available ? 'e.g. "Plan chilli for dinner Mon–Thu, 1 portion each"' : 'AI unavailable',
+    disabled: !status.available,
+  });
+  const sendButton = h('button', { type: 'button', class: 'primary', disabled: !status.available, onclick: () => send() }, 'Send');
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) send();
+  });
+
+  async function send() {
+    const message = input.value.trim();
+    if (!message || sendButton.disabled) return;
+    sendButton.disabled = true;
+    const userBubble = h('div', { class: 'bubble user' }, message);
+    const waiting = h('div', { class: 'bubble ai muted' }, 'Thinking…');
+    log.append(userBubble, waiting);
+    waiting.scrollIntoView({ block: 'end' });
+    try {
+      const res = await api('POST', '/ai/chat', { session_id: sessionId, message });
+      sessionId = res.session_id;
+      store.set('ai-session', sessionId);
+      waiting.remove();
+      userBubble.remove();
+      log.append(...chatTurn(message, res.reply, res.proposals).flat().filter(Boolean));
+      input.value = '';
+    } catch (e) {
+      waiting.className = 'bubble ai error';
+      waiting.textContent = e.message; // message stays in the box so you can retry
+    } finally {
+      sendButton.disabled = !status.available;
+      log.lastElementChild?.scrollIntoView({ block: 'end' });
+    }
+  }
+
+  const newChat = () => { store.set('ai-session', null); render(); };
+
+  return [
+    h('div', { class: 'toolbar' }, h('h2', {}, 'Chat'), h('span', { class: 'spacer' }),
+      h('button', { type: 'button', onclick: newChat }, 'New chat')),
+    status.available
+      ? h('p', { class: 'muted' }, 'Ask about your plan, pantry or shopping. Changes only happen when you tap Apply.')
+      : h('div', { class: 'warn' },
+        h('p', {}, h('strong', {}, 'AI unavailable')),
+        h('p', {}, status.reason),
+        h('p', { class: 'muted' }, 'Everything else in the app works without it. Proposals already here can still be applied or rejected.')),
+    log,
+    h('div', { class: 'chat-input' }, input, sendButton),
+  ];
+}
+
 // ---------------------------------------------------------------- router
 
-const ROUTES = { plan: planView, shopping: shoppingView, recipes: recipesView, ingredients: ingredientsView, pantry: pantryView };
+const ROUTES = { plan: planView, shopping: shoppingView, recipes: recipesView, ingredients: ingredientsView, pantry: pantryView, chat: chatView };
 let renderSeq = 0;
 
 async function render() {

@@ -2,9 +2,9 @@
 
 A small, modular meal planner meant to run on a Raspberry Pi. It has a FastAPI + SQLite backend and a mobile-first PWA you use from your phone.
 
-**Status: stages 1–3 are done (data layer, frontend, operations). Stage 4 (AI) is next.**
+**Status: all four stages are done: data layer, frontend, operations, and an optional AI assistant.**
 
-Contents: [Run it on Windows](#run-it-on-windows-powershell) · [Run it on Linux / Pi](#run-it-on-linux--raspberry-pi) · [Raspberry Pi as a service](#raspberry-pi-setup-systemd-service) · [Phone access with Tailscale (HTTPS)](#reach-it-from-your-phone-with-tailscale-https) · [Backups](#backups) · [Using the app](#using-the-app) · [API](#api-all-under-api) · [Rules](#rules)
+Contents: [Run it on Windows](#run-it-on-windows-powershell) · [Run it on Linux / Pi](#run-it-on-linux--raspberry-pi) · [Raspberry Pi as a service](#raspberry-pi-setup-systemd-service) · [Phone access with Tailscale (HTTPS)](#reach-it-from-your-phone-with-tailscale-https) · [Backups](#backups) · [AI assistant](#ai-assistant-optional) · [Using the app](#using-the-app) · [API](#api-all-under-api) · [Rules](#rules)
 
 ## Run it on Windows (PowerShell)
 
@@ -147,6 +147,55 @@ cp ../backups/mealplanner-2026-10-07_031500.db mealplanner.db
 sudo systemctl start mealplanner
 ```
 
+## AI assistant (optional)
+
+The **Chat** tab lets you ask Claude to read and change your plan in plain English, e.g. "plan chilli for dinner Monday to Thursday, one portion each" or "I bought the mince".
+
+- **Nothing changes without you.** Reading your data (ingredients, recipes, pantry, plan, shopping list) happens immediately. Every change the AI wants to make (add an ingredient, create a recipe, plan or remove a meal, set a pantry amount, record shopping, mark a meal eaten) comes back as a card with **Apply** / **Reject**. A new recipe is a draft card until you apply it.
+- **Apply runs in one transaction** through the same backend code as the rest of the app, so the maths is identical and a failure changes nothing.
+- **Order matters for dependent proposals.** Apply them in the order shown. For example, apply a new ingredient before the recipe that uses it; applying the recipe first returns a clear error and changes nothing.
+- **The API key stays on the server.** It's read from the `ANTHROPIC_API_KEY` environment variable and never sent to the browser. Without it, the Chat tab shows "AI unavailable" and everything else works as normal.
+
+### Setting the API key
+
+Create a key at [console.anthropic.com](https://console.anthropic.com/) and set it as an environment variable for the server process.
+
+**Windows (PowerShell):**
+
+```powershell
+$env:ANTHROPIC_API_KEY = "sk-ant-..."       # this terminal only
+python -m uvicorn --factory mealplanner.main:create_app --reload --port 8000
+```
+
+To keep it for new terminals, run `[Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", "sk-ant-...", "User")` once, then open a new PowerShell window.
+
+**Raspberry Pi (systemd):** put the key in a root-only file that the service loads (`EnvironmentFile=` in `deploy/mealplanner.service`).
+
+```bash
+sudo install -m 600 -o root -g root /dev/null /etc/mealplanner.env   # empty file, mode 600
+sudo nano /etc/mealplanner.env                                        # add the line below
+#   ANTHROPIC_API_KEY=sk-ant-...
+sudo systemctl daemon-reload && sudo systemctl restart mealplanner
+```
+
+If you installed the service before stage 4, reinstall it first to pick up the `EnvironmentFile=` line: rerun the `sed ... | sudo tee` command from the systemd section. Check with `ls -l /etc/mealplanner.env` (should show `-rw------- root root`). Don't put the key in the unit file, the repo, or your shell history on a shared machine.
+
+### Settings (environment variables)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | not set | Enables the chat. Server-side only |
+| `MEALPLANNER_AI_MODEL` | `claude-haiku-5-5` | Claude model id. The default is the small, cheap model; for example `claude-sonnet-5-5` is smarter and costs more |
+| `MEALPLANNER_AI_EFFORT` | model default | `low`, `medium` or `high`: how much the model thinks before answering. Lower is cheaper |
+| `MEALPLANNER_AI_MAX_ITERATIONS` | `8` | Max model calls per chat message (tool-use steps). The last step must answer in text |
+| `MEALPLANNER_AI_MAX_MESSAGE_CHARS` | `2000` | Longest message you can send |
+| `MEALPLANNER_AI_MAX_TURNS` | `40` | Messages per chat before you have to start a new one (keeps each request small) |
+| `MEALPLANNER_AI_MAX_TOKENS` | `4096` | Output cap per model call |
+
+On the Pi, add these to `/etc/mealplanner.env` too.
+
+**Cost:** every chat message logs its token usage. You'll see a line like `mealplanner.ai: chat ... iterations=2 input_tokens=5400 output_tokens=120` in the console or in `journalctl -u mealplanner`, and usage is also stored per message in the `ai_turns` table. Multiply by the current price for your model ([pricing](https://www.anthropic.com/pricing)) to see what you're spending. Set a monthly spend limit in the Anthropic Console as a backstop.
+
 ## Using the app
 
 `frontend/` is a plain HTML/CSS/JS progressive web app with no build step. The backend serves it from the same origin as the API. The frontend does no quantity maths: every number it shows comes from the API.
@@ -156,6 +205,7 @@ sudo systemctl start mealplanner
 - **Recipes:** name, servings (portions one batch makes) and the ingredients for one batch.
 - **Ingredients:** name, base unit, optional price per unit, staple flag and optional category.
 - **Pantry:** every ingredient with an editable quantity that saves as you go. Leave it blank to remove the item from the pantry.
+- **Chat:** the optional AI assistant (see above). Your conversation is kept on the server; **New chat** starts a fresh one.
 
 ## Layout
 
@@ -177,6 +227,8 @@ backend/mealplanner/
     ingredients/ recipes/ pantry/ plan/   CRUD routers
     shopping/          shopping list + "bought" (logic.py is the pure maths)
     eaten/             mark-as-eaten + its own consumption_log table (logic.py is the pure maths)
+    ai/                Claude chat: tools.py (tool definitions, proposals, apply), engine.py (tool-use loop),
+                       store.py (sessions, history, proposals tables), prompt.py, config.py (env settings)
 ```
 
 ### Adding a module
@@ -206,6 +258,12 @@ The app discovers it at startup, applies its migrations and mounts its router un
 | POST | `/shopping-list/bought` | `{start, end, items: [{ingredient_id, quantity?}]}` adds the items to the pantry. A missing `quantity` means the list's to-buy amount. All or nothing. Returns what was added and the recomputed list |
 | POST | `/plan/{id}/eaten` | Deducts from the pantry and reports shortfalls. Returns 409 if the meal is already eaten |
 | GET | `/plan/{id}/eaten` | What that meal took from the pantry |
+| GET | `/ai/status` | Whether the AI is available (and why not), the model, and the message length limit |
+| POST | `/ai/chat` | `{session_id?, message}` returns `{session_id, reply, proposals}`. Returns 503 if the AI isn't configured |
+| GET | `/ai/sessions/{id}` | Chat history with each proposal's status |
+| GET | `/ai/proposals/{id}` | One proposal |
+| POST | `/ai/proposals/{id}/apply` | Performs it in one transaction. Returns 409 if it was already decided. Works without an API key |
+| POST | `/ai/proposals/{id}/reject` | Marks it rejected; nothing changes |
 
 All quantities are in the ingredient's base unit. There's no unit conversion.
 

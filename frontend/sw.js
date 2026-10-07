@@ -1,7 +1,7 @@
 // Service worker: makes the app installable and lets the shell open offline.
 // Network-first for the app shell so updates show up immediately; the API is
 // never cached (it always needs the live backend).
-const CACHE = 'mealplanner-shell-v2';
+const CACHE = 'mealplanner-shell-v3';
 const SHELL = ['/', '/index.html', '/app.js', '/style.css', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {

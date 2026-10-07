@@ -63,6 +63,7 @@ button, .button {
   cursor: pointer;
 }
 button.primary, .button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
 button.danger { color: var(--danger); }
 button.icon { min-width: 40px; padding: 6px; }
 input, select {
@@ -156,8 +157,8 @@ nav#nav {
 nav#nav a {
   flex: 1;
   text-align: center;
-  padding: 14px 2px;
-  font-size: 0.85rem;
+  padding: 14px 1px;
+  font-size: 0.78rem;
   color: var(--muted);
   text-decoration: none;
 }
@@ -182,3 +183,20 @@ dialog::backdrop { background: rgb(0 0 0 / 0.4); }
 dialog h3 { margin-top: 0; }
 dialog .actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 16px; }
 dialog .actions .left { margin-right: auto; }
+
+/* Chat */
+.chat-log { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.bubble { max-width: 85%; padding: 8px 12px; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bubble.user { align-self: flex-end; background: var(--accent); color: var(--accent-fg); }
+.bubble.ai { align-self: flex-start; background: var(--soft); border: 1px solid var(--line); }
+.bubble.error { color: var(--danger); }
+.proposal { align-self: stretch; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 8px 12px; }
+.proposal.pending { border-left-color: var(--warn); }
+.proposal.rejected, .proposal.discarded { opacity: 0.6; }
+.proposal-title { font-weight: 600; }
+.proposal ul { margin: 6px 0; padding-left: 18px; }
+.proposal .toolbar { margin: 8px 0 0; }
+.proposal p { margin: 6px 0 0; }
+.chat-input { display: flex; gap: 8px; align-items: flex-end; position: sticky; bottom: calc(56px + env(safe-area-inset-bottom)); background: var(--bg); padding: 8px 0; }
+.chat-input textarea:disabled { opacity: 0.6; }
+.chat-input textarea { flex: 1; font: inherit; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); resize: vertical; }

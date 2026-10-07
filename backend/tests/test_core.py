@@ -16,7 +16,7 @@ def test_migrations_recorded_per_owner_and_idempotent(db_path):
     create_app(db_path)
     create_app(db_path)  # restarting must not re-run anything
     rows = sqlite3.connect(db_path).execute("SELECT owner, version FROM schema_migrations ORDER BY owner").fetchall()
-    assert rows == [("core", 1), ("core", 2), ("eaten", 1)]
+    assert rows == [("ai", 1), ("core", 1), ("core", 2), ("eaten", 1)]
 
 
 def test_stage1_database_is_upgraded_from_multiplier_to_portions(db_path):
@@ -56,7 +56,7 @@ def test_failed_migration_rolls_back(tmp_path):
 
 
 def test_health_lists_discovered_modules(client):
-    assert set(client.get("/api/health").json()["modules"]) == {"eaten", "ingredients", "pantry", "plan", "recipes", "shopping"}
+    assert set(client.get("/api/health").json()["modules"]) == {"ai", "eaten", "ingredients", "pantry", "plan", "recipes", "shopping"}
 
 
 def test_foreign_keys_enforced(db_path):
@@ -97,3 +97,31 @@ def test_new_module_is_discovered_without_editing_existing_code(tmp_path, monkey
     assert client.get("/api/notes").json() == {"count": 0}
     sys.modules.pop("fakemods", None)
     sys.modules.pop("fakemods.notes", None)
+
+
+def test_nested_transactions_roll_back_together(tmp_path):
+    from mealplanner.core.db import transaction
+
+    conn = connect(tmp_path / "t.db")
+    conn.execute("CREATE TABLE t (x)")
+    with pytest.raises(RuntimeError):
+        with transaction(conn):
+            conn.execute("INSERT INTO t VALUES (1)")
+            with transaction(conn):  # inner block succeeds on its own...
+                conn.execute("INSERT INTO t VALUES (2)")
+            raise RuntimeError("...but the outer one fails")
+    assert conn.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 0
+
+
+def test_failed_inner_transaction_only_undoes_itself(tmp_path):
+    from mealplanner.core.db import transaction
+
+    conn = connect(tmp_path / "t.db")
+    conn.execute("CREATE TABLE t (x)")
+    with transaction(conn):
+        conn.execute("INSERT INTO t VALUES (1)")
+        with pytest.raises(RuntimeError):
+            with transaction(conn):
+                conn.execute("INSERT INTO t VALUES (2)")
+                raise RuntimeError
+    assert [r[0] for r in conn.execute("SELECT x FROM t")] == [1]
