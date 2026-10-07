@@ -2,7 +2,7 @@
 
 A small, modular meal planner meant to run on a Raspberry Pi. It has a FastAPI + SQLite backend and (from stage 2) a mobile-first PWA.
 
-**Status: stage 1 is done (data layer and logic). There's no frontend yet.**
+**Status: stages 1 (data layer and logic) and 2 (frontend) are done.**
 
 ## Run it
 
@@ -15,11 +15,28 @@ pytest                                    # run the tests
 uvicorn --factory mealplanner.main:create_app --host 0.0.0.0 --port 8000
 ```
 
-Open `http://<host>:8000/docs` for interactive API docs. The database is a single file at `backend/data/mealplanner.db`. You can override that path with `MEALPLANNER_DB=/path/to/file.db`.
+Open `http://<host>:8000/` for the app and `http://<host>:8000/docs` for interactive API docs. The database is a single file at `backend/data/mealplanner.db`. You can override that path with `MEALPLANNER_DB=/path/to/file.db`.
+
+## Frontend
+
+`frontend/` is a plain HTML/CSS/JS progressive web app with no build step. The backend serves it from the same origin as the API, so there's nothing extra to run. Set `MEALPLANNER_FRONTEND=/path` to serve it from somewhere else.
+
+Screens (bottom nav):
+
+- **Plan**: a 7-day × breakfast/lunch/dinner grid. Tap a cell to pick a recipe and the portions eaten, or to remove it. The ‹ › buttons move between weeks.
+- **Shop**: the shopping list for a date range (defaults to this week), grouped by ingredient category and checkable. Check marks are kept in the phone's browser storage, per date range.
+- **Recipes**: name, servings (portions one batch makes) and the ingredients for one batch.
+- **Ingredients**: name, base unit, optional price per unit, staple flag, optional category.
+- **Pantry**: every ingredient with an editable quantity. Each change saves as you go, and a blank field removes the item from the pantry.
+
+The frontend does no quantity maths. It only displays what the API returns.
+
+**Installing on a phone:** browsers only offer "Install app" or "Add to Home Screen" as a full PWA over HTTPS (or on `localhost`). Over plain `http://<pi-ip>:8000` the app still works fully in the browser. Stage 3 covers getting HTTPS through Tailscale.
 
 ## Layout
 
 ```
+frontend/              index.html, app.js, style.css, sw.js, manifest.webmanifest, icons/
 backend/mealplanner/
   main.py              app factory: runs migrations, mounts every discovered module
   core/
