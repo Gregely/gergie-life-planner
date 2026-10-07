@@ -67,3 +67,45 @@ def build_shopping_list(
         estimated_total=round(sum(priced), 2),
         unpriced_items=len(items) - len(priced),
     )
+
+
+class Purchase(BaseModel):
+    ingredient_id: int
+    added: float  # quantity added to the pantry
+    pantry_before: float  # 0 if the ingredient was not in the pantry
+    pantry_after: float
+
+
+def resolve_purchase_quantities(
+    requested: Mapping[int, float | None],
+    to_buy: Mapping[int, float],
+) -> dict[int, float]:
+    """Quantity bought per ingredient: the edited amount if given, else the list's to-buy amount.
+
+    Raises ``KeyError`` (with the ingredient id) when no amount is given for an
+    ingredient that is not on the shopping list, as there is nothing to default to.
+    """
+    resolved: dict[int, float] = {}
+    for ingredient_id, quantity in requested.items():
+        if quantity is None:
+            if ingredient_id not in to_buy:
+                raise KeyError(ingredient_id)
+            quantity = to_buy[ingredient_id]
+        resolved[ingredient_id] = quantity
+    return resolved
+
+
+def add_purchases(bought: Mapping[int, float], pantry: Mapping[int, float]) -> list[Purchase]:
+    """Add bought quantities on top of what is already in the pantry."""
+    purchases = []
+    for ingredient_id, quantity in sorted(bought.items()):
+        before = pantry_lookup(pantry, ingredient_id)
+        purchases.append(
+            Purchase(
+                ingredient_id=ingredient_id,
+                added=clean(quantity),
+                pantry_before=clean(before),
+                pantry_after=clean(before + quantity),
+            )
+        )
+    return purchases

@@ -8,6 +8,7 @@
   --accent: #2f6b3a;
   --accent-fg: #ffffff;
   --danger: #b3261e;
+  --warn: #a15c00;
   --done: #8a8a8a;
   color-scheme: light dark;
 }
@@ -21,6 +22,7 @@
     --accent: #7fc28c;
     --accent-fg: #102214;
     --danger: #ff8a80;
+    --warn: #ffb74d;
     --done: #777;
   }
 }
@@ -108,6 +110,14 @@ table.grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
 }
 .grid td button.empty { color: var(--muted); text-align: center; }
 .grid td.eaten button { color: var(--done); }
+.grid td button.eat {
+  min-height: 34px;
+  padding: 4px;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--accent);
+  border-top: 1px dashed var(--line);
+}
 
 /* Shopping list */
 .check { display: flex; gap: 10px; align-items: flex-start; }
@@ -116,6 +126,15 @@ table.grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .check .qty { white-space: nowrap; font-weight: 600; }
 li.done .item-title, li.done .qty { text-decoration: line-through; color: var(--done); }
 .total { margin-top: 16px; font-weight: 600; }
+.bought-row { display: grid; grid-template-columns: auto 7rem auto; gap: 8px; align-items: center; margin: 8px 0 0 32px; }
+.bought-actions { position: sticky; bottom: calc(56px + env(safe-area-inset-bottom)); background: var(--bg); padding: 8px 0; }
+
+/* Mark-as-eaten result */
+.warn { border-left: 4px solid var(--warn); padding: 2px 12px; margin: 8px 0; }
+.warn strong { color: var(--warn); }
+.warn ul { padding-left: 18px; margin: 6px 0; }
+details { margin-top: 12px; }
+details ul { padding-left: 18px; margin: 6px 0; }
 
 /* Recipe editor rows */
 .item-row { display: grid; grid-template-columns: 1fr 6.5rem 2.6rem 40px; gap: 6px; align-items: center; margin-bottom: 6px; }

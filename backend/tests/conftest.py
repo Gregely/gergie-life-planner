@@ -48,6 +48,11 @@ class Api:
     def to_buy(self, start, end):
         return {i["ingredient_id"]: i["to_buy"] for i in self.shopping(start, end)["items"]}
 
+    def bought(self, start, end, items, status=200):
+        """``items`` maps ingredient id -> quantity (None = use the list's to-buy amount)."""
+        body = {"start": start, "end": end, "items": [{"ingredient_id": i, "quantity": q} for i, q in items.items()]}
+        return self._ok(self.c.post("/api/shopping-list/bought", json=body), status)
+
     def eat(self, plan_id):
         return self._ok(self.c.post(f"/api/plan/{plan_id}/eaten"))
 

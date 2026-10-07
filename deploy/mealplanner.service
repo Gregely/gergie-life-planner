@@ -1,0 +1,24 @@
+# systemd unit for the meal planner on a Raspberry Pi.
+# Install (replaces __USER__ with your login name):
+#   sed "s/__USER__/$USER/g" deploy/mealplanner.service | sudo tee /etc/systemd/system/mealplanner.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now mealplanner
+#
+# Listens on 127.0.0.1 only; `tailscale serve` provides HTTPS to your devices.
+# For plain-HTTP access on your home network instead, change --host to 0.0.0.0.
+
+[Unit]
+Description=Meal planner (FastAPI + SQLite)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=/home/__USER__/gergie-life-planner/backend
+Environment=MEALPLANNER_DB=/home/__USER__/gergie-life-planner/backend/data/mealplanner.db
+ExecStart=/home/__USER__/gergie-life-planner/backend/.venv/bin/python -m uvicorn --factory mealplanner.main:create_app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -100,12 +100,12 @@ function openDialog(title, content, buttons) {
       type: 'button',
       class: b.class,
       onclick: async (ev) => {
-        if (!b.action) { dlg.close(); return; }
+        if (!b.action) { dismiss(); return; }
         const button = ev.currentTarget; // currentTarget is null once we await
         button.disabled = true;
         try {
           await b.action();
-          dlg.close();
+          dismiss();
           render();
         } catch (e) {
           error.textContent = e.message;
@@ -116,7 +116,10 @@ function openDialog(title, content, buttons) {
       },
     }, b.label))),
   );
-  dlg.addEventListener('close', () => dlg.remove());
+  // Remove right away (the 'close' event fires a tick later) so a dialog opened
+  // from an action never coexists with the one that opened it.
+  const dismiss = () => { dlg.close(); dlg.remove(); };
+  dlg.addEventListener('close', () => dlg.remove()); // Esc key
   document.body.append(dlg);
   dlg.showModal();
   return dlg;
@@ -180,6 +183,12 @@ async function planView([week]) {
           }, entry
             ? [entry.recipe_name, h('br'), h('small', {}, entry.eaten_at ? '✓ eaten' : portionsText(entry.portions))]
             : '+'),
+          entry && !entry.eaten_at ? h('button', {
+            type: 'button',
+            class: 'eat',
+            'aria-label': `Mark ${SLOT_LABEL[slot].toLowerCase()} on ${longDate(day)} as eaten`,
+            onclick: () => confirmEaten(entry),
+          }, 'Mark eaten') : null,
         );
       }),
     ));
@@ -220,12 +229,66 @@ function editPlanCell(date, slot, entry, recipes) {
   if (entry) buttons.push({ label: 'Remove', class: 'danger left', action: () => api('DELETE', `/plan/${entry.id}`) });
   buttons.push({ label: 'Cancel' }, { label: 'Save', class: 'primary', action: save });
 
+  const takenLog = h('div', {});
+  if (entry && entry.eaten_at) {
+    api('GET', `/plan/${entry.id}/eaten`).then((rows) => {
+      if (rows.length) takenLog.replaceChildren(takenList(rows.map((r) => ({ ...r, remaining: null }))));
+    }).catch(() => { /* informational only */ });
+  }
+
   openDialog(`${SLOT_LABEL[slot]}, ${longDate(parseIso(date))}`, [
-    entry && entry.eaten_at ? h('p', { class: 'muted' }, 'Already marked as eaten.') : null,
+    entry && entry.eaten_at ? [h('p', { class: 'muted' }, 'Already marked as eaten.'), takenLog] : null,
     h('label', { for: 'plan-recipe' }, 'Recipe'), recipeSelect,
     h('label', { for: 'plan-portions' }, 'Portions eaten'), portions,
     recipes.length ? null : h('p', { class: 'muted' }, 'No recipes yet. Add one on the Recipes tab.'),
   ], buttons);
+}
+
+function confirmEaten(entry) {
+  openDialog(`Mark ${entry.recipe_name} as eaten?`, [
+    h('p', {}, `${SLOT_LABEL[entry.slot]}, ${longDate(parseIso(entry.date))}: ${portionsText(entry.portions)}.`),
+    h('p', { class: 'muted' }, 'Its ingredients will be taken out of the pantry.'),
+  ], [
+    { label: 'Cancel' },
+    {
+      label: 'Mark eaten',
+      class: 'primary',
+      action: async () => showEatenResult(await api('POST', `/plan/${entry.id}/eaten`)),
+    },
+  ]);
+}
+
+/** <details> listing what came out of the pantry (deductions or consumption-log rows). */
+function takenList(rows) {
+  const taken = rows.filter((r) => r.deducted > 0);
+  if (!taken.length) return h('p', { class: 'muted' }, 'Nothing was taken from the pantry.');
+  return h('details', {},
+    h('summary', {}, 'Taken from the pantry'),
+    h('ul', {}, taken.map((r) => h('li', {},
+      `${r.name}: ${qty(r.deducted, r.unit)}`,
+      r.remaining == null ? null : h('small', {}, ` (${qty(r.remaining, r.unit)} left)`)))),
+  );
+}
+
+function showEatenResult(result) {
+  // Staples (salt, oil...) are rarely counted precisely, so running short of
+  // them is normal and is mentioned quietly. Real shortfalls are highlighted.
+  const short = result.shortfalls.filter((s) => !s.is_staple);
+  const staples = result.shortfalls.filter((s) => s.is_staple);
+  openDialog(`${result.recipe_name}: eaten`, [
+    short.length
+      ? h('div', { class: 'warn' },
+        h('p', {}, h('strong', {}, `The pantry ran short of ${short.length === 1 ? '1 ingredient' : `${short.length} ingredients`}:`)),
+        h('ul', {}, short.map((s) => h('li', {},
+          h('strong', {}, s.name), ` needed ${qty(s.required, s.unit)}, had ${qty(s.available, s.unit)}: `,
+          h('strong', {}, `${qty(s.shortfall, s.unit)} short`)))),
+        h('p', { class: 'muted' }, 'These are now at 0 in the pantry. If you actually had more, correct it on the Pantry tab.'))
+      : h('p', {}, '✓ Pantry updated. Nothing ran short.'),
+    staples.length
+      ? h('p', { class: 'muted' }, `Staples not fully in the pantry: ${staples.map((s) => s.name).join(', ')}. No action needed.`)
+      : null,
+    takenList(result.deductions),
+  ], [{ label: 'OK', class: 'primary' }]);
 }
 
 // ---------------------------------------------------------------- shopping
@@ -236,8 +299,16 @@ async function shoppingView([startParam, endParam]) {
   const end = validIso(endParam) ? endParam : iso(addDays(parseIso(start), 6));
   const list = await api('GET', `/shopping-list?start=${start}&end=${end}`);
 
+  // Checked items, per date range: ingredient id -> edited amount ('' = use the to-buy amount).
   const checkKey = `shopping-checked:${start}:${end}`;
-  const checked = new Set(store.get(checkKey, []));
+  const saved = store.get(checkKey, {});
+  const checked = new Map(Array.isArray(saved) // stage-2 format was a plain id list
+    ? saved.map((id) => [id, ''])
+    : Object.entries(saved).map(([id, amount]) => [Number(id), String(amount ?? '')]));
+  const onList = new Set(list.items.map((i) => i.ingredient_id));
+  for (const id of checked.keys()) if (!onList.has(id)) checked.delete(id);
+  const persist = () => { store.set(checkKey, Object.fromEntries(checked)); updateActions(); };
+
   const startInput = h('input', { type: 'date', value: start, 'aria-label': 'From' });
   const endInput = h('input', { type: 'date', value: end, 'aria-label': 'To' });
   const go = () => { if (startInput.value && endInput.value) location.hash = `#/shopping/${startInput.value}/${endInput.value}`; };
@@ -248,39 +319,81 @@ async function shoppingView([startParam, endParam]) {
   const sections = [...groups].map(([category, items]) => [
     h('h3', {}, category),
     h('ul', { class: 'list' }, items.map((item) => {
-      const li = h('li', { class: checked.has(item.ingredient_id) ? 'done' : null });
+      const id = item.ingredient_id;
+      const li = h('li', { class: checked.has(id) ? 'done' : null });
+      const amount = h('input', {
+        type: 'number', inputmode: 'decimal', min: '0', step: 'any',
+        'aria-label': `${item.name} amount bought`,
+        // Not edited -> show the to-buy amount; the backend uses its exact figure.
+        value: checked.get(id) || String(+item.to_buy.toFixed(2)),
+        oninput: () => { checked.set(id, amount.value); persist(); },
+      });
+      const boughtRow = h('div', { class: 'bought-row', hidden: !checked.has(id) },
+        h('span', { class: 'muted' }, 'Bought'), amount, h('span', { class: 'muted' }, item.unit));
       const box = h('input', {
         type: 'checkbox',
-        checked: checked.has(item.ingredient_id),
+        checked: checked.has(id),
         onchange: () => {
-          if (box.checked) checked.add(item.ingredient_id); else checked.delete(item.ingredient_id);
+          if (box.checked) checked.set(id, ''); else checked.delete(id);
+          amount.value = String(+item.to_buy.toFixed(2));
           li.classList.toggle('done', box.checked);
-          store.set(checkKey, [...checked]);
+          boughtRow.hidden = !box.checked;
+          persist();
         },
       });
-      li.append(h('label', { class: 'check' },
-        box,
-        h('span', { class: 'grow' },
-          h('span', { class: 'item-title' }, item.name), h('br'),
-          h('small', {}, `need ${qty(item.needed, item.unit)}, have ${qty(item.in_pantry, item.unit)}`),
+      li.append(
+        h('label', { class: 'check' },
+          box,
+          h('span', { class: 'grow' },
+            h('span', { class: 'item-title' }, item.name), h('br'),
+            h('small', {}, `need ${qty(item.needed, item.unit)}, have ${qty(item.in_pantry, item.unit)}`),
+          ),
+          h('span', { class: 'qty' }, qty(item.to_buy, item.unit),
+            item.estimated_cost == null ? null : [h('br'), h('small', {}, money(item.estimated_cost))]),
         ),
-        h('span', { class: 'qty' }, qty(item.to_buy, item.unit),
-          item.estimated_cost == null ? null : [h('br'), h('small', {}, money(item.estimated_cost))]),
-      ));
+        boughtRow,
+      );
       return li;
     })),
   ]);
 
+  const addButton = h('button', { type: 'button', class: 'primary', onclick: () => addCheckedToPantry() });
+  const uncheckButton = h('button', { type: 'button', onclick: () => { store.set(checkKey, {}); render(); } }, 'Uncheck all');
+  const actions = h('div', { class: 'toolbar bought-actions' }, addButton, uncheckButton);
+  function updateActions() {
+    actions.hidden = checked.size === 0;
+    addButton.textContent = `Add ${checked.size} checked to pantry`;
+  }
+  updateActions();
+
+  async function addCheckedToPantry() {
+    const items = [...checked].map(([ingredient_id, edited]) => ({
+      ingredient_id,
+      quantity: edited.trim() === '' ? null : Number(edited),
+    }));
+    addButton.disabled = true;
+    try {
+      const result = await api('POST', '/shopping-list/bought', { start, end, items });
+      for (const { ingredient_id } of result.added) checked.delete(ingredient_id);
+      store.set(checkKey, Object.fromEntries(checked));
+      flash(`Added ${result.added.length} item${result.added.length === 1 ? '' : 's'} to the pantry.`);
+      render();
+    } catch (e) {
+      flash(e.message, true);
+      addButton.disabled = false;
+    }
+  }
+
   return [
     h('h2', {}, 'Shopping list'),
     h('div', { class: 'row' }, h('div', { class: 'grow' }, startInput), '→', h('div', { class: 'grow' }, endInput)),
-    h('p', { class: 'muted' }, 'Planned meals not yet eaten, minus the pantry. Staples are left off.'),
+    h('p', { class: 'muted' }, 'Planned meals not yet eaten, minus the pantry. Staples are left off. Tick what you bought, then add it to the pantry.'),
     list.items.length ? sections : h('p', {}, 'Nothing to buy for these dates.'),
     list.items.length ? h('p', { class: 'total' },
       `Estimated total: ${money(list.estimated_total)}`,
       list.unpriced_items ? h('small', {}, ` (+ ${list.unpriced_items} item${list.unpriced_items === 1 ? '' : 's'} without a price)`) : null,
     ) : null,
-    checked.size ? h('button', { type: 'button', onclick: () => { store.set(checkKey, []); render(); } }, 'Uncheck all') : null,
+    actions,
   ];
 }
 

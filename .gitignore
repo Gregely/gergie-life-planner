@@ -7,3 +7,5 @@ backend/data/
 *.db
 *.db-wal
 *.db-shm
+backend/backups/
+backend/*.log
