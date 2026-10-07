@@ -47,4 +47,14 @@ CORE_MIGRATIONS = [
         CREATE INDEX plan_date ON plan(date);
         """,
     ),
+    # A plan entry now records portions eaten rather than a batch multiplier.
+    # Existing rows are converted so they keep needing the same ingredients:
+    # multiplier m of an s-serving recipe == m * s portions.
+    Migration(
+        2,
+        """
+        ALTER TABLE plan RENAME COLUMN servings_multiplier TO portions;
+        UPDATE plan SET portions = portions * (SELECT servings FROM recipes WHERE recipes.id = plan.recipe_id);
+        """,
+    ),
 ]

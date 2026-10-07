@@ -18,16 +18,24 @@ def clean(value: float) -> float:
     return round(value, _DECIMALS)
 
 
-def aggregate_requirements(rows: Iterable[tuple[int, float, float]]) -> dict[int, float]:
+def portion_quantity(recipe_quantity: float, portions: float, recipe_servings: int) -> float:
+    """Amount of an ingredient needed for ``portions`` of a recipe that makes ``recipe_servings``.
+
+    E.g. 500 g in a 4-serving recipe: 1 portion needs 125 g, 4 portions 500 g.
+    """
+    return recipe_quantity * portions / recipe_servings
+
+
+def aggregate_requirements(rows: Iterable[tuple[int, float, float, int]]) -> dict[int, float]:
     """Total each ingredient across meals.
 
-    ``rows`` are ``(ingredient_id, recipe_quantity, servings_multiplier)``, one
-    per recipe item per planned meal. The same ingredient appearing in several
-    meals is summed; each line is scaled by its meal's multiplier.
+    ``rows`` are ``(ingredient_id, recipe_quantity, portions, recipe_servings)``,
+    one per recipe item per planned meal. The same ingredient appearing in
+    several meals is summed after each line is scaled to its meal's portions.
     """
     totals: dict[int, float] = defaultdict(float)
-    for ingredient_id, quantity, multiplier in rows:
-        totals[ingredient_id] += quantity * multiplier
+    for ingredient_id, quantity, portions, servings in rows:
+        totals[ingredient_id] += portion_quantity(quantity, portions, servings)
     return {ingredient_id: clean(total) for ingredient_id, total in totals.items()}
 
 

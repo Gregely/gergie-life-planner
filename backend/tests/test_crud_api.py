@@ -112,14 +112,14 @@ def test_pantry_validation(api, client):
 def test_plan_crud_and_ordering(api, client):
     rid = api.recipe("Soup", {})
     dinner = api.plan("2026-10-05", "dinner", rid)
-    breakfast = api.plan("2026-10-05", "breakfast", rid, multiplier=0.5)
+    breakfast = api.plan("2026-10-05", "breakfast", rid, portions=0.5)
     api.plan("2026-10-04", "lunch", rid)
     week = client.get("/api/plan", params={"start": "2026-10-05", "end": "2026-10-11"}).json()
     assert [e["id"] for e in week] == [breakfast, dinner]
-    assert week[0]["servings_multiplier"] == 0.5 and week[0]["recipe_name"] == "Soup"
+    assert week[0]["portions"] == 0.5 and week[0]["recipe_name"] == "Soup"
 
     moved = client.put(f"/api/plan/{dinner}", json={"date": "2026-10-06", "slot": "lunch", "recipe_id": rid})
-    assert moved.json()["date"] == "2026-10-06" and moved.json()["servings_multiplier"] == 1
+    assert moved.json()["date"] == "2026-10-06" and moved.json()["portions"] == 1
     assert client.delete(f"/api/plan/{dinner}").status_code == 204
     assert client.get(f"/api/plan/{dinner}").status_code == 404
 
@@ -138,7 +138,7 @@ def test_plan_validation(api, client):
     bad = [
         {"date": "2026-10-05", "slot": "brunch", "recipe_id": rid},
         {"date": "2026-02-30", "slot": "lunch", "recipe_id": rid},
-        {"date": "2026-10-05", "slot": "lunch", "recipe_id": rid, "servings_multiplier": 0},
+        {"date": "2026-10-05", "slot": "lunch", "recipe_id": rid, "portions": 0},
     ]
     for body in bad:
         assert client.post("/api/plan", json=body).status_code == 422, body

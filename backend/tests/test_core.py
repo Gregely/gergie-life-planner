@@ -16,7 +16,28 @@ def test_migrations_recorded_per_owner_and_idempotent(db_path):
     create_app(db_path)
     create_app(db_path)  # restarting must not re-run anything
     rows = sqlite3.connect(db_path).execute("SELECT owner, version FROM schema_migrations ORDER BY owner").fetchall()
-    assert rows == [("core", 1), ("eaten", 1)]
+    assert rows == [("core", 1), ("core", 2), ("eaten", 1)]
+
+
+def test_stage1_database_is_upgraded_from_multiplier_to_portions(db_path):
+    """A plan made before portions existed keeps needing the same ingredients."""
+    from mealplanner.core.schema import CORE_MIGRATIONS
+
+    conn = connect(db_path)
+    apply_migrations(conn, "core", CORE_MIGRATIONS[:1])
+    conn.execute("INSERT INTO ingredients (id, name, unit) VALUES (1, 'Mince', 'g')")
+    conn.execute("INSERT INTO recipes (id, name, servings) VALUES (1, 'Chilli', 4)")
+    conn.execute("INSERT INTO recipe_items VALUES (1, 1, 500)")
+    conn.execute("INSERT INTO plan (date, slot, recipe_id, servings_multiplier) VALUES ('2026-10-05', 'dinner', 1, 1.5)")
+    conn.close()
+
+    client = TestClient(create_app(db_path))
+    [entry] = client.get("/api/plan", params={"start": "2026-10-05", "end": "2026-10-05"}).json()
+    assert entry["portions"] == 6  # 1.5 batches x 4 servings
+    items = client.get("/api/shopping-list", params={"start": "2026-10-05", "end": "2026-10-05"}).json()["items"]
+    assert items[0]["to_buy"] == 750  # unchanged: 1.5 x 500 g
+    with pytest.raises(sqlite3.IntegrityError):  # the > 0 check survives the rename
+        connect(db_path).execute("UPDATE plan SET portions = 0")
 
 
 def test_new_migration_versions_apply_incrementally(tmp_path):

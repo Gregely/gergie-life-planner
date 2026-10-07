@@ -28,15 +28,15 @@ class Api:
         body = {"name": name, "unit": unit, "price_per_unit": price, "is_staple": staple, "category": category}
         return self._ok(self.c.post("/api/ingredients", json=body), 201)["id"]
 
-    def recipe(self, name, items, servings=2):
+    def recipe(self, name, items, servings=1):
         body = {"name": name, "servings": servings, "items": [{"ingredient_id": i, "quantity": q} for i, q in items.items()]}
         return self._ok(self.c.post("/api/recipes", json=body), 201)["id"]
 
     def stock(self, ingredient_id, quantity):
         return self._ok(self.c.put(f"/api/pantry/{ingredient_id}", json={"quantity": quantity}))
 
-    def plan(self, date, slot, recipe_id, multiplier=1.0):
-        body = {"date": date, "slot": slot, "recipe_id": recipe_id, "servings_multiplier": multiplier}
+    def plan(self, date, slot, recipe_id, portions=1.0):
+        body = {"date": date, "slot": slot, "recipe_id": recipe_id, "portions": portions}
         return self._ok(self.c.post("/api/plan", json=body), 201)["id"]
 
     def pantry(self):

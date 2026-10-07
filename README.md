@@ -57,7 +57,7 @@ The app discovers it at startup, applies its migrations and mounts its router un
 | GET | `/pantry` | |
 | GET/PUT/DELETE | `/pantry/{ingredient_id}` | PUT `{quantity}` sets an absolute amount |
 | GET | `/plan?start=&end=` | Inclusive date range |
-| POST | `/plan` | `{date, slot: breakfast\|lunch\|dinner, recipe_id, servings_multiplier=1}`. One entry per date+slot |
+| POST | `/plan` | `{date, slot: breakfast\|lunch\|dinner, recipe_id, portions=1}`. One entry per date+slot |
 | GET/PUT/DELETE | `/plan/{id}` | |
 | GET | `/shopping-list?start=&end=` | Shortfalls only, with cost estimate |
 | POST | `/plan/{id}/eaten` | Deducts from the pantry and reports shortfalls. Returns 409 if the meal is already eaten |
@@ -67,6 +67,6 @@ All quantities are in the ingredient's base unit. There's no unit conversion.
 
 ## Rules
 
-- **Servings multiplier** scales every quantity in the recipe: 2 means double the recipe. The recipe's `servings` field is informational.
-- **Shopping list** for a date range = sum of (recipe quantity × multiplier) over planned meals that haven't been eaten, minus what's in the pantry, keeping only positive shortfalls. Staples are never listed. Eaten meals are skipped because their ingredients already came out of the pantry.
+- **Portions.** A recipe's `servings` is how many portions one batch makes. A plan entry's `portions` is how many portions are eaten at that meal. Ingredient needs = recipe quantity × portions ÷ recipe servings. So a 4-serving chilli planned on 4 nights at 1 portion each needs exactly one batch, and 2 portions needs half a batch.
+- **Shopping list** for a date range = sum of (recipe quantity × portions ÷ servings) over planned meals that haven't been eaten, minus what's in the pantry, keeping only positive shortfalls. Staples are never listed. Eaten meals are skipped because their ingredients already came out of the pantry.
 - **Mark as eaten** takes `min(required, in pantry)` for each ingredient, so the pantry never goes below zero. Any remainder is reported as a shortfall. Ingredients with no pantry row count as 0 and no row is created for them. Staples are deducted like anything else, and their shortfalls are flagged with `is_staple` so the UI can play them down. The whole operation runs in one transaction.

@@ -1,4 +1,4 @@
-"""Meal plan: one recipe per (date, slot), scaled by a servings multiplier."""
+"""Meal plan: one recipe per (date, slot) and the number of portions eaten."""
 
 import datetime as dt
 

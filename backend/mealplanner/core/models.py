@@ -47,7 +47,7 @@ class RecipeItemIn(_In):
 
 class RecipeIn(_In):
     name: str = Field(min_length=1, max_length=200)
-    servings: int = Field(gt=0)
+    servings: int = Field(gt=0, description="Portions one batch of the recipe makes")
     items: list[RecipeItemIn] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -99,7 +99,7 @@ class PlanEntryIn(_In):
     date: dt.date
     slot: Slot
     recipe_id: int
-    servings_multiplier: float = Field(default=1.0, gt=0, description="Scales every recipe quantity")
+    portions: float = Field(default=1.0, gt=0, description="Portions eaten; needs = recipe quantity x portions / recipe servings")
 
 
 class PlanEntry(BaseModel):
@@ -108,5 +108,5 @@ class PlanEntry(BaseModel):
     slot: Slot
     recipe_id: int
     recipe_name: str
-    servings_multiplier: float
+    portions: float
     eaten_at: str | None

@@ -13,12 +13,44 @@ def test_deducts_ingredients_from_pantry(api):
     assert result["recipe_name"] == "Pasta" and result["eaten_at"]
 
 
-def test_servings_multiplier_scales_deduction(api):
+def test_portions_scale_deduction(api):
     rice = api.ingredient("Rice")
-    entry = api.plan("2026-10-05", "dinner", api.recipe("Rice", {rice: 80}), multiplier=2.5)
+    entry = api.plan("2026-10-05", "dinner", api.recipe("Rice", {rice: 160}, servings=2), portions=2.5)
     api.stock(rice, 1000)
-    api.eat(entry)
+    assert api.eat(entry)["deductions"][0]["required"] == 200
     assert api.pantry() == {rice: 800}
+
+
+def test_one_portion_of_four_serving_recipe_deducts_a_quarter(api):
+    mince = api.ingredient("Mince")
+    entry = api.plan("2026-10-05", "dinner", api.recipe("Chilli", {mince: 500}, servings=4), portions=1)
+    api.stock(mince, 500)
+    api.eat(entry)
+    assert api.pantry() == {mince: 375}
+
+
+def test_two_portions_of_four_serving_recipe_deducts_half_a_batch(api):
+    mince = api.ingredient("Mince")
+    onion = api.ingredient("Onion", unit="count")
+    entry = api.plan("2026-10-05", "dinner", api.recipe("Chilli", {mince: 500, onion: 2}, servings=4), portions=2)
+    api.stock(mince, 500)
+    api.stock(onion, 2)
+    api.eat(entry)
+    assert api.pantry() == {mince: 250, onion: 1}
+
+
+def test_eating_four_single_portions_uses_exactly_one_batch(api):
+    mince = api.ingredient("Mince")
+    stock = api.ingredient("Stock", unit="ml")
+    chilli = api.recipe("Chilli", {mince: 500, stock: 100}, servings=4)
+    soup = api.recipe("Soup", {stock: 100}, servings=3)
+    chilli_meals = [api.plan(d, "dinner", chilli, portions=1) for d in ("2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08")]
+    soup_meals = [api.plan("2026-10-09", s, soup, portions=1) for s in ("breakfast", "lunch", "dinner")]
+    api.stock(mince, 500)
+    api.stock(stock, 200)
+    for entry in chilli_meals + soup_meals:
+        assert api.eat(entry)["shortfalls"] == []
+    assert api.pantry() == {mince: 0, stock: 0}
 
 
 def test_never_goes_below_zero_and_reports_shortfall(api):

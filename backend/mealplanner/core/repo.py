@@ -212,7 +212,7 @@ def delete_pantry_item(conn: sqlite3.Connection, ingredient_id: int) -> None:
 # --- Plan ----------------------------------------------------------------------
 
 _PLAN_SELECT = """
-    SELECT p.id, p.date, p.slot, p.recipe_id, r.name AS recipe_name, p.servings_multiplier, p.eaten_at
+    SELECT p.id, p.date, p.slot, p.recipe_id, r.name AS recipe_name, p.portions, p.eaten_at
     FROM plan p JOIN recipes r ON r.id = p.recipe_id
 """
 _SLOT_ORDER = "CASE p.slot WHEN 'breakfast' THEN 0 WHEN 'lunch' THEN 1 ELSE 2 END"
@@ -252,8 +252,8 @@ def create_plan_entry(conn: sqlite3.Connection, data: PlanEntryIn) -> PlanEntry:
     get_recipe(conn, data.recipe_id)
     _check_slot_free(conn, data)
     cur = conn.execute(
-        "INSERT INTO plan (date, slot, recipe_id, servings_multiplier) VALUES (?, ?, ?, ?)",
-        (data.date.isoformat(), data.slot, data.recipe_id, data.servings_multiplier),
+        "INSERT INTO plan (date, slot, recipe_id, portions) VALUES (?, ?, ?, ?)",
+        (data.date.isoformat(), data.slot, data.recipe_id, data.portions),
     )
     return get_plan_entry(conn, cur.lastrowid)
 
@@ -263,8 +263,8 @@ def update_plan_entry(conn: sqlite3.Connection, plan_id: int, data: PlanEntryIn)
     get_recipe(conn, data.recipe_id)
     _check_slot_free(conn, data, ignore_id=plan_id)
     conn.execute(
-        "UPDATE plan SET date = ?, slot = ?, recipe_id = ?, servings_multiplier = ? WHERE id = ?",
-        (data.date.isoformat(), data.slot, data.recipe_id, data.servings_multiplier, plan_id),
+        "UPDATE plan SET date = ?, slot = ?, recipe_id = ?, portions = ? WHERE id = ?",
+        (data.date.isoformat(), data.slot, data.recipe_id, data.portions, plan_id),
     )
     return get_plan_entry(conn, plan_id)
 
@@ -281,8 +281,8 @@ def requirement_rows(
     end: dt.date | None = None,
     plan_ids: list[int] | None = None,
     include_eaten: bool = False,
-) -> list[tuple[int, float, float]]:
-    """Raw ``(ingredient_id, recipe_quantity, servings_multiplier)`` rows for planned meals.
+) -> list[tuple[int, float, float, int]]:
+    """Raw ``(ingredient_id, recipe_quantity, portions, recipe_servings)`` rows for planned meals.
 
     Feed the result to :func:`mealplanner.core.quantities.aggregate_requirements`.
     Filter by date range and/or explicit plan entry ids. Meals already marked
@@ -301,7 +301,10 @@ def requirement_rows(
         params += plan_ids
     if not include_eaten:
         where.append("p.eaten_at IS NULL")
-    sql = "SELECT ri.ingredient_id, ri.quantity, p.servings_multiplier FROM plan p JOIN recipe_items ri ON ri.recipe_id = p.recipe_id"
+    sql = (
+        "SELECT ri.ingredient_id, ri.quantity, p.portions, r.servings FROM plan p "
+        "JOIN recipes r ON r.id = p.recipe_id JOIN recipe_items ri ON ri.recipe_id = p.recipe_id"
+    )
     if where:
         sql += " WHERE " + " AND ".join(where)
-    return [(r[0], r[1], r[2]) for r in conn.execute(sql, params)]
+    return [(r[0], r[1], r[2], r[3]) for r in conn.execute(sql, params)]

@@ -15,7 +15,7 @@ from mealplanner.core.quantities import EPSILON, clean, pantry_lookup
 
 class Deduction(BaseModel):
     ingredient_id: int
-    required: float  # what the meal used (scaled by the servings multiplier)
+    required: float  # what the meal used (recipe quantity x portions / servings)
     available: float  # pantry quantity before eating (0 if not in the pantry)
     deducted: float  # min(required, available)
     remaining: float  # pantry quantity afterwards, never negative
