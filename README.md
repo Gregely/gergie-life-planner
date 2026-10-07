@@ -1,0 +1,72 @@
+# Meal Planner
+
+A small, modular meal planner meant to run on a Raspberry Pi. It has a FastAPI + SQLite backend and (from stage 2) a mobile-first PWA.
+
+**Status: stage 1 is done (data layer and logic). There's no frontend yet.**
+
+## Run it
+
+```bash
+cd backend
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements-dev.txt
+
+pytest                                    # run the tests
+uvicorn --factory mealplanner.main:create_app --host 0.0.0.0 --port 8000
+```
+
+Open `http://<host>:8000/docs` for interactive API docs. The database is a single file at `backend/data/mealplanner.db`. You can override that path with `MEALPLANNER_DB=/path/to/file.db`.
+
+## Layout
+
+```
+backend/mealplanner/
+  main.py              app factory: runs migrations, mounts every discovered module
+  core/
+    db.py              connection, transactions, per-owner migration runner
+    schema.py          core tables (ingredients, recipes, recipe_items, pantry, plan)
+    models.py          shared pydantic models
+    repo.py            data access for core entities (used by routers, later by AI tools)
+    quantities.py      shared quantity maths (aggregate plan requirements, float cleanup)
+    module.py          the Module contract + auto-discovery
+    errors.py          NotFound / Conflict / Invalid -> 404 / 409 / 422
+  modules/
+    ingredients/ recipes/ pantry/ plan/   CRUD routers
+    shopping/          shopping list (logic.py is the pure maths)
+    eaten/             mark-as-eaten + its own consumption_log table (logic.py is the pure maths)
+```
+
+### Adding a module
+
+Create `mealplanner/modules/<name>/__init__.py` that defines:
+
+```python
+module = Module(name="<name>", router=router, migrations=[Migration(1, "CREATE TABLE ...")])
+```
+
+The app discovers it at startup, applies its migrations and mounts its router under `/api`. You don't edit any existing file. Migrations are tracked per module in `schema_migrations`.
+
+## API (all under `/api`)
+
+| Method | Path | Notes |
+|---|---|---|
+| GET/POST | `/ingredients` | `{name, unit: g\|ml\|count, price_per_unit?, is_staple, category?}` |
+| GET/PUT/DELETE | `/ingredients/{id}` | Deleting returns 409 if a recipe uses the ingredient |
+| GET/POST | `/recipes` | `{name, servings, items: [{ingredient_id, quantity}]}` |
+| GET/PUT/DELETE | `/recipes/{id}` | PUT replaces the ingredient list. Deleting returns 409 if the recipe is planned |
+| GET | `/pantry` | |
+| GET/PUT/DELETE | `/pantry/{ingredient_id}` | PUT `{quantity}` sets an absolute amount |
+| GET | `/plan?start=&end=` | Inclusive date range |
+| POST | `/plan` | `{date, slot: breakfast\|lunch\|dinner, recipe_id, servings_multiplier=1}`. One entry per date+slot |
+| GET/PUT/DELETE | `/plan/{id}` | |
+| GET | `/shopping-list?start=&end=` | Shortfalls only, with cost estimate |
+| POST | `/plan/{id}/eaten` | Deducts from the pantry and reports shortfalls. Returns 409 if the meal is already eaten |
+| GET | `/plan/{id}/eaten` | What that meal took from the pantry |
+
+All quantities are in the ingredient's base unit. There's no unit conversion.
+
+## Rules
+
+- **Servings multiplier** scales every quantity in the recipe: 2 means double the recipe. The recipe's `servings` field is informational.
+- **Shopping list** for a date range = sum of (recipe quantity × multiplier) over planned meals that haven't been eaten, minus what's in the pantry, keeping only positive shortfalls. Staples are never listed. Eaten meals are skipped because their ingredients already came out of the pantry.
+- **Mark as eaten** takes `min(required, in pantry)` for each ingredient, so the pantry never goes below zero. Any remainder is reported as a shortfall. Ingredients with no pantry row count as 0 and no row is created for them. Staples are deducted like anything else, and their shortfalls are flagged with `is_staple` so the UI can play them down. The whole operation runs in one transaction.
